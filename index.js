@@ -2,18 +2,21 @@ const express = require("express");
 const { createClient } = require("@supabase/supabase-js");
 
 const app = express();
+
+/* =========================
+   IMPORTANT (global JSON)
+========================= */
 app.use(express.json());
 
 /* =========================
-   SUPABASE CONNECTION
+   SUPABASE
 ========================= */
 const supabase = createClient(
-  "https://yntlcknrkduzbjsfrjuj.supabase.co",
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InludGxja25ya2R1emJqc2ZyanVqIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NzgyMTA3NCwiZXhwIjoyMDkzMzk3MDc0fQ.6qnu7s8CNbcmY7uF8yNWMLh2-qAIKUrtR-YGiXTwoz8"
+  "https://yntlcknrkduzbjsfrjuj.supabase.co", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InludGxja25ya2R1emJqc2ZyanVqIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NzgyMTA3NCwiZXhwIjoyMDkzMzk3MDc0fQ.6qnu7s8CNbcmY7uF8yNWMLh2-qAIKUrtR-YGiXTwoz8"
 );
 
 /* =========================
-   TEST SERVER
+   TEST ROUTE
 ========================= */
 app.get("/", (req, res) => {
   res.send("SERVER OK 🚀");
@@ -22,39 +25,47 @@ app.get("/", (req, res) => {
 /* =========================
    STRIPE WEBHOOK
 ========================= */
-app.post("/webhook", async (req, res) => {
+app.post("/webhook", express.raw({ type: "application/json" }), async (req, res) => {
 
-  const event = req.body;
+  try {
 
-  // paiement réussi
-  if (event.type === "checkout.session.completed") {
+    const event = JSON.parse(req.body.toString());
 
-    const email = event.data.object.customer_details.email;
+    console.log("🔥 WEBHOOK RECU :", event.type);
 
-    console.log("💰 PAIEMENT OK :", email);
+    if (event.type === "checkout.session.completed") {
 
-    // 🔥 ACTIVER USER DANS SUPABASE
-    const { data, error } = await supabase
-      .from("profiles")
-      .update({
-        active: true,
-        subscription: "pro"
-      })
-      .eq("email", email);
+      const email = event.data.object.customer_details?.email;
 
-    if (error) {
-      console.log("❌ ERREUR SUPABASE:", error.message);
-    } else {
-      console.log("✅ USER ACTIVÉ :", email);
+      console.log("💰 PAIEMENT OK :", email);
+
+      const { error } = await supabase
+        .from("profiles")
+        .update({
+          active: true,
+          subscription: "pro"
+        })
+        .eq("email", email);
+
+      if (error) {
+        console.log("❌ SUPABASE ERROR:", error.message);
+      } else {
+        console.log("✅ USER ACTIVÉ :", email);
+      }
     }
-  }
 
-  res.sendStatus(200);
+    res.sendStatus(200);
+
+  } catch (err) {
+    console.log("❌ WEBHOOK ERROR:", err.message);
+    res.sendStatus(400);
+  }
 });
 
 /* =========================
    START SERVER
 ========================= */
-app.listen(3000, () => {
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
   console.log("🚀 SERVER OK");
 });
