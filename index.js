@@ -7,7 +7,7 @@ const app = express();
 /* =========================
    STRIPE INIT
 ========================= */
-const stripe = Stripe("sk_test_51TT4FwJ7NjMs2QUfrJgbUBlezblsr6nlB7QlogaHFkTAbIhFE9gKdvwhhW4l85UgF6qV32uvtFfJM3pPOLcGQ3h200pXE8N61G");
+const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
 
 /* =========================
    SUPABASE
@@ -20,7 +20,10 @@ const supabase = createClient(
 /* =========================
    WEBHOOK STRIPE (DOIT ÊTRE AVANT express.json)
 ========================= */
-app.post("/webhook", express.raw({ type: "application/json" }), async (req, res) => {
+app.post("/webhook", (req, res) => {
+  console.log("🔥 REQUÊTE WEBHOOK REÇUE");
+  res.sendStatus(200);
+});
   try {
     const event = JSON.parse(req.body.toString());
 
