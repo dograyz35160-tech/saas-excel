@@ -1,23 +1,20 @@
-app.post("/webhook", express.raw({ type: "application/json" }), (req, res) => {
-  try {
-    console.log("🔥 WEBHOOK HIT OK");
+const express = require("express");
+const app = express();
 
-    const body = req.body.toString();
-    console.log("RAW BODY:", body);
+app.use(express.json());
 
-    let event;
-    try {
-      event = JSON.parse(body);
-    } catch (e) {
-      console.log("❌ JSON ERROR");
-      return res.sendStatus(400);
-    }
+app.get("/", (req, res) => {
+  res.send("OK SERVER 🚀");
+});
 
-    console.log("EVENT TYPE:", event.type);
+app.post("/webhook", (req, res) => {
+  console.log("WEBHOOK HIT");
+  console.log(req.body);
 
-    res.sendStatus(200);
-  } catch (err) {
-    console.log("❌ FATAL WEBHOOK ERROR:", err);
-    res.sendStatus(500);
-  }
+  res.sendStatus(200);
+});
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log("SERVER RUNNING ON", PORT);
 });
