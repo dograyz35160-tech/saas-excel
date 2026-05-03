@@ -5,7 +5,7 @@ const Stripe = require("stripe");
 const app = express();
 
 /* =========================
-   STRIPE INIT
+   STRIPE
 ========================= */
 const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
 
@@ -13,17 +13,14 @@ const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
    SUPABASE
 ========================= */
 const supabase = createClient(
-  "https://yntlcknrkduzbjsfrjuj.supabase.co",
-"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InludGxja25ya2R1emJqc2ZyanVqIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NzgyMTA3NCwiZXhwIjoyMDkzMzk3MDc0fQ.6qnu7s8CNbcmY7uF8yNWMLh2-qAIKUrtR-YGiXTwoz8"
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_KEY
 );
 
 /* =========================
-   WEBHOOK STRIPE (DOIT ÊTRE AVANT express.json)
+   STRIPE WEBHOOK (IMPORTANT: AVANT express.json)
 ========================= */
-app.post("/webhook", (req, res) => {
-  console.log("🔥 REQUÊTE WEBHOOK REÇUE");
-  res.sendStatus(200);
-});
+app.post("/webhook", express.raw({ type: "application/json" }), async (req, res) => {
   try {
     const event = JSON.parse(req.body.toString());
 
@@ -51,13 +48,13 @@ app.post("/webhook", (req, res) => {
 
     res.sendStatus(200);
   } catch (err) {
-    console.log("❌ ERROR WEBHOOK :", err.message);
+    console.log("❌ WEBHOOK ERROR :", err.message);
     res.sendStatus(400);
   }
 });
 
 /* =========================
-   JSON MIDDLEWARE (APRES WEBHOOK)
+   JSON MIDDLEWARE (APRÈS WEBHOOK)
 ========================= */
 app.use(express.json());
 
@@ -69,7 +66,7 @@ app.get("/", (req, res) => {
 });
 
 /* =========================
-   CHECKOUT STRIPE
+   CREATE CHECKOUT SESSION
 ========================= */
 app.post("/create-checkout", async (req, res) => {
   try {
@@ -97,7 +94,7 @@ app.post("/create-checkout", async (req, res) => {
 });
 
 /* =========================
-   START SERVER
+   START SERVER (RAILWAY SAFE)
 ========================= */
 const PORT = process.env.PORT || 3000;
 
