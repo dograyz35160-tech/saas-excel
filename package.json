@@ -2,7 +2,9 @@
   "dependencies": {
     "@supabase/supabase-js": "^2.105.1",
     "cors": "^2.8.6",
+    "docx": "^9.6.1",
     "express": "^5.2.1",
+    "openai": "^6.35.0",
     "stripe": "^22.1.0"
   },
   "name": "saas-excel",
