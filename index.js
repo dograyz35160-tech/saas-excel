@@ -13,7 +13,10 @@ app.post("/webhook", express.raw({ type: "application/json" }), async (req, res)
     const event = JSON.parse(req.body.toString());
     if (event.type === "checkout.session.completed") {
       const email = event.data.object.customer_details?.email;
-      const { error } = await supabase.from("profiles").update({ active: true, subscription: "pro" }).eq("email", email);
+      const { error } = await supabase
+        .from("profiles")
+        .update({ active: true, subscription: "pro" })
+        .eq("email", email);
     }
     res.sendStatus(200);
   } catch (err) { res.sendStatus(400); }
@@ -31,7 +34,7 @@ app.post("/create-checkout", async (req, res) => {
     const session = await stripe.checkout.sessions.create({
       mode: "subscription",
       payment_method_types: ["card"],
-      line_items: [{ price: "price_1TT7QYJ7NjMs2QUfoYTHU7iE", quantity: 1 }],
+      line_items: [{ price: process.env.PRICE_ID, quantity: 1 }],
       customer_email: email,
       success_url: "https://saas-excel-backend-production.up.railway.app/success",
       cancel_url: "https://saas-excel-backend-production.up.railway.app/cancel",
@@ -40,20 +43,28 @@ app.post("/create-checkout", async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// ── Analyse IA depuis Excel (OpenAI) ──
-// C'est ici qu'Excel envoie les donnees du parc
-// Railway recoit le prompt + la cle du client
-// Railway appelle OpenAI et renvoie la reponse a Excel
+// ── Analyse IA depuis Excel (vérification abonnement par email) ──
 app.post("/api/analyze", async (req, res) => {
   try {
-    const { prompt, apiKey } = req.body;
+    const { prompt, email } = req.body;
 
-    if (!prompt || !apiKey) {
-      return res.status(400).json({ error: "prompt et apiKey sont requis" });
+    if (!prompt || !email) {
+      return res.status(400).json({ error: "prompt et email requis" });
     }
 
-    // On utilise la cle du client (il paye son propre usage OpenAI)
-    const openai = new OpenAI({ apiKey: apiKey });
+    // Vérifier abonnement actif dans Supabase
+    const { data, error } = await supabase
+      .from("profiles")
+      .select("active, subscription")
+      .eq("email", email)
+      .single();
+
+    if (error || !data || !data.active) {
+      return res.status(403).json({ error: "Abonnement inactif ou introuvable" });
+    }
+
+    // Clé OpenAI stockée sur Railway
+    const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
     const completion = await openai.chat.completions.create({
       model: "gpt-4o-mini",
@@ -63,15 +74,11 @@ app.post("/api/analyze", async (req, res) => {
           role: "system",
           content: "Tu es un expert en maintenance de parc d'engins BTP. Tu analyses des KPIs et donnes des recommandations concretes et courtes en francais."
         },
-        {
-          role: "user",
-          content: prompt
-        }
+        { role: "user", content: prompt }
       ]
     });
 
-    const result = completion.choices[0].message.content;
-    res.json({ result: result });
+    res.json({ result: completion.choices[0].message.content });
 
   } catch (err) {
     console.error("Erreur OpenAI:", err.message);
