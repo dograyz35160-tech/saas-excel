@@ -7,142 +7,85 @@ const cors = require("cors");
 const app = express();
 const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-// ── CORS — autorise Excel/navigateur local ──
-app.use(cors({
-  origin: function(origin, callback) {
-    callback(null, true); // autorise tout
-  },
-  methods: ["GET", "POST"],
-  allowedHeaders: ["Content-Type"]
-}));
-
-// ── Webhook Stripe ──
-app.post("/webhook", express.raw({ type: "application/json" }), async (req, res) => {
-  try {
-    const event = JSON.parse(req.body.toString());
-    if (event.type === "checkout.session.completed") {
-      const email = event.data.object.customer_details?.email;
-      const { error } = await supabase
-        .from("profiles")
-        .update({ active: true, subscription: "pro" })
-        .eq("email", email);
-    }
-    res.sendStatus(200);
-  } catch (err) { res.sendStatus(400); }
+// CORS — autorise Excel local (file://) et tout navigateur
+app.use(cors({ origin: "*", methods: ["GET", "POST", "OPTIONS"], allowedHeaders: ["Content-Type"] }));
+app.use((req, res, next) => {
+  res.header("Access-Control-Allow-Origin", "*");
+  res.header("Access-Control-Allow-Headers", "Content-Type");
+  if (req.method === "OPTIONS") return res.sendStatus(200);
+  next();
 });
-
 app.use(express.json());
 
-// ── Page d'accueil ──
-app.get("/", (req, res) => { res.send("SERVER OK"); });
-
-// ── Checkout Stripe ──
-app.post("/create-checkout", async (req, res) => {
-  try {
-    const { email } = req.body;
-    const session = await stripe.checkout.sessions.create({
-      mode: "subscription",
-      payment_method_types: ["card"],
-      line_items: [{ price: process.env.PRICE_ID, quantity: 1 }],
-      customer_email: email,
-      success_url: "https://saas-excel-backend-production.up.railway.app/success",
-      cancel_url: "https://saas-excel-backend-production.up.railway.app/cancel",
-    });
-    res.json({ url: session.url });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+// Santé Railway
+app.get("/", (req, res) => {
+  res.json({ status: "Trackyon Railway OK", version: "6.0" });
 });
 
-// ── Analyse IA depuis Excel (vérification abonnement par email) ──
+// Vérifier email seul — appelé par Excel avant d'ouvrir le chat
+app.post("/api/check-email", async (req, res) => {
+  const { email } = req.body;
+  if (!email) return res.status(400).json({ ok: false, error: "Email manquant." });
+
+  const { data, error } = await supabase
+    .from("profiles")
+    .select("email, subscription, active")
+    .eq("email", email.trim().toLowerCase())
+    .single();
+
+  if (error || !data) {
+    return res.json({ ok: false, error: "Email non reconnu dans Trackyon." });
+  }
+  if (!data.active) {
+    return res.json({ ok: false, error: "Abonnement inactif. Contactez support@trackyon.app" });
+  }
+  return res.json({ ok: true, subscription: data.subscription });
+});
+
+// Analyse IA principale
 app.post("/api/analyze", async (req, res) => {
-  try {
-    const { prompt, email } = req.body;
+  const { prompt, email } = req.body;
 
-    if (!prompt || !email) {
-      return res.status(400).json({ error: "prompt et email requis" });
-    }
-
-    // Vérifier abonnement actif dans Supabase
-    const { data, error } = await supabase
-      .from("profiles")
-      .select("active, subscription")
-      .eq("email", email)
-      .single();
-
-    if (error || !data || !data.active) {
-      return res.status(403).json({ error: "Abonnement inactif ou introuvable" });
-    }
-
-    // Clé OpenAI stockée sur Railway
-    const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-
-    const completion = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      max_tokens: 1000,
-      messages: [
-        {
-          role: "system",
-          content: "Tu es un expert en maintenance de parc d'engins BTP. Tu analyses des KPIs et donnes des recommandations concretes et courtes en francais."
-        },
-        { role: "user", content: prompt }
-      ]
-    });
-
-    res.json({ result: completion.choices[0].message.content });
-
-  } catch (err) {
-    console.error("Erreur OpenAI:", err.message);
-    res.status(500).json({ error: err.message });
+  if (!email || email.trim() === "") {
+    return res.status(401).json({ error: "Email requis. Relancez depuis Excel." });
   }
-});
 
-// ── Analyse IA depuis le site web (devis modal) ──
-app.post("/api/ai-devis", async (req, res) => {
-  try {
-    const { engins, secteur, difficulte, outil } = req.body;
-    const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  // Vérification Supabase — table "profiles"
+  const { data: profile, error } = await supabase
+    .from("profiles")
+    .select("email, subscription, active")
+    .eq("email", email.trim().toLowerCase())
+    .single();
 
-    const completion = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      max_tokens: 300,
-      messages: [{
-        role: "user",
-        content: `Tu es conseiller Trackyon. Prospect : secteur=${secteur}, engins=${engins}, difficulte=${difficulte}, outil=${outil}. Ecris 3 phrases courtes en tutoyant le prospect : 1) son probleme, 2) comment Trackyon le resout, 3) un resultat concret. Pas de liste, juste des phrases.`
-      }]
+  if (error || !profile) {
+    return res.status(403).json({
+      error: "Acces refuse : " + email + " n'est pas dans Trackyon. Verifiez votre abonnement."
     });
-
-    res.json({ text: completion.choices[0].message.content });
-  } catch (err) {
-    res.json({ text: "" });
   }
-});
 
-// ── Analyse IA depuis la modale devis du site ──
-app.post("/api/ai-devis-modal", async (req, res) => {
+  if (!profile.active) {
+    return res.status(403).json({
+      error: "Abonnement inactif pour " + email + ". Contactez support@trackyon.app"
+    });
+  }
+
+  // Appel OpenAI
   try {
-    const { prenom, email, secteur, engins, diff, msg } = req.body;
-    const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-
     const completion = await openai.chat.completions.create({
       model: "gpt-4o-mini",
-      max_tokens: 250,
-      messages: [{
-        role: "user",
-        content: `Tu es conseiller Trackyon. Prospect : prenom=${prenom}, secteur=${secteur}, engins=${engins}, difficulte=${diff}${msg ? ", message=" + msg : ""}. Ecris 3 phrases courtes en tutoyant ${prenom} : 1) son probleme, 2) comment Trackyon le resout, 3) un resultat concret. Pas de liste, juste des phrases.`
-      }]
+      messages: [{ role: "user", content: prompt }],
+      max_tokens: 800,
+      temperature: 0.3,
     });
-
-    res.json({ text: completion.choices[0].message.content });
+    const result = completion.choices[0].message.content;
+    return res.json({ result });
   } catch (err) {
-    res.json({ text: "" });
+    console.error("OpenAI error:", err);
+    return res.status(500).json({ error: "Erreur serveur OpenAI : " + err.message });
   }
 });
 
 const PORT = process.env.PORT || 3000;
-// Headers manuels pour file:// (Excel local)
-app.use((req, res, next) => {
-  res.header("Access-Control-Allow-Origin", "*");
-  res.header("Access-Control-Allow-Headers", "Content-Type");
-  next();
-});
-app.listen(PORT, "0.0.0.0", () => { console.log("SERVER OK ON PORT", PORT); });
+app.listen(PORT, () => console.log("Trackyon Railway port " + PORT));
