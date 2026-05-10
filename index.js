@@ -2,10 +2,20 @@ const express = require("express");
 const { createClient } = require("@supabase/supabase-js");
 const Stripe = require("stripe");
 const OpenAI = require("openai");
+const cors = require("cors");
 
 const app = express();
 const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
+
+// ── CORS — autorise Excel/navigateur local ──
+app.use(cors({
+  origin: function(origin, callback) {
+    callback(null, true); // autorise tout
+  },
+  methods: ["GET", "POST"],
+  allowedHeaders: ["Content-Type"]
+}));
 
 // ── Webhook Stripe ──
 app.post("/webhook", express.raw({ type: "application/json" }), async (req, res) => {
@@ -129,4 +139,10 @@ app.post("/api/ai-devis-modal", async (req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
+// Headers manuels pour file:// (Excel local)
+app.use((req, res, next) => {
+  res.header("Access-Control-Allow-Origin", "*");
+  res.header("Access-Control-Allow-Headers", "Content-Type");
+  next();
+});
 app.listen(PORT, "0.0.0.0", () => { console.log("SERVER OK ON PORT", PORT); });
